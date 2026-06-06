@@ -20,6 +20,7 @@ class Database:
         self.restart_message_col: AsyncCollection = self.db.restart_message
         self.files_col: AsyncCollection = self.db.files
         self.file_ingest_locks_col: AsyncCollection = self.db.file_ingest_locks
+        self.media_groups_col: AsyncCollection = self.db.media_groups
 
     async def _deduplicate_users(self) -> None:
         pipeline = [
@@ -57,6 +58,8 @@ class Database:
             await self.files_col.create_index("created_at")
             await self.files_col.create_index("last_seen_at")
             await self.file_ingest_locks_col.create_index("expires_at", expireAfterSeconds=0)
+            await self.media_groups_col.create_index("media_group_id", unique=True)
+            await self.media_groups_col.create_index("created_at", expireAfterSeconds=86400)
 
             logger.debug("Database indexes ensured.")
             return True
@@ -445,6 +448,27 @@ class Database:
         except Exception as e:
             logger.error(f"Error checking ingest claim for {file_unique_id}: {e}", exc_info=True)
             raise
+
+    async def save_media_group_metadata(self, group_record: Dict[str, Any]) -> None:
+        """Save media group metadata to database for persistence."""
+        try:
+            await self.media_groups_col.update_one(
+                {"media_group_id": group_record["media_group_id"]},
+                {"$set": group_record},
+                upsert=True
+            )
+            logger.debug(f"Saved metadata for media group {group_record['media_group_id']}.")
+        except Exception as e:
+            logger.error(f"Error saving media group metadata: {e}", exc_info=True)
+            raise
+
+    async def get_media_group_metadata(self, media_group_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve media group metadata from database."""
+        try:
+            return await self.media_groups_col.find_one({"media_group_id": media_group_id})
+        except Exception as e:
+            logger.error(f"Error getting media group metadata for {media_group_id}: {e}", exc_info=True)
+            return None
 
     async def close(self):
         if self._client:
